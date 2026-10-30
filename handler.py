@@ -109,7 +109,9 @@ def get_output_files(prompt_id):
 
 def handle_preload():
     """Download models directly inside RunPod datacenter straight into the mounted Network Volume."""
-    from huggingface_hub import hf_hub_download
+    os.environ["HF_HUB_ENABLE_HF_TRANSFER"] = "0"
+    os.environ["HF_XET_HIGH_PERFORMANCE"] = "0"
+    base_url = "https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/main"
     repo = "Comfy-Org/MiniMax-H3"
     target_base = "/workspace/ComfyUI/models"
     files = [
@@ -129,9 +131,19 @@ def handle_preload():
             print(f"[PRELOAD] Exists: {dst} ({os.path.getsize(dst)} bytes)", flush=True)
             results.append({"file": fname, "status": "already_exists", "size": os.path.getsize(dst)})
             continue
-        print(f"[PRELOAD] Downloading {fname}...", flush=True)
-        downloaded = hf_hub_download(repo_id=repo, filename=rpath, local_dir=target_base)
-        sz = os.path.getsize(downloaded) if os.path.exists(downloaded) else 0
+        print(f"[PRELOAD] Downloading {fname} via streaming URL...", flush=True)
+        # Use direct chunked HTTP download to avoid xet/hf_transfer NFS lock issues on RunPod volumes
+        file_url = f"{base_url}/{rpath}"
+        tmp_dst = dst + ".part"
+        req = urllib.request.Request(file_url, headers={"User-Agent": "Mozilla/5.0"})
+        with urllib.request.urlopen(req, timeout=300) as resp, open(tmp_dst, "wb") as out_f:
+            while True:
+                chunk = resp.read(16 * 1024 * 1024) # 16 MB chunk
+                if not chunk:
+                    break
+                out_f.write(chunk)
+        os.rename(tmp_dst, dst)
+        sz = os.path.getsize(dst)
         print(f"[PRELOAD] Done {fname} ({sz} bytes)", flush=True)
         results.append({"file": fname, "status": "downloaded", "size": sz})
 
