@@ -85,9 +85,13 @@ def queue_prompt(prompt_workflow):
     p = {"prompt": prompt_workflow, "client_id": client_id}
     data = json.dumps(p).encode("utf-8")
     req = urllib.request.Request(f"http://{COMFY_HOST}/prompt", data=data, headers={"Content-Type": "application/json"})
-    with urllib.request.urlopen(req, timeout=30) as r:
-        res = json.loads(r.read().decode())
-    return res["prompt_id"], client_id
+    try:
+        with urllib.request.urlopen(req, timeout=30) as r:
+            res = json.loads(r.read().decode())
+        return res["prompt_id"], client_id
+    except urllib.error.HTTPError as err:
+        err_body = err.read().decode("utf-8", errors="replace")
+        raise RuntimeError(f"ComfyUI prompt validation failed (HTTP {err.code}): {err_body}")
 
 def wait_for_execution(prompt_id, client_id, timeout=600):
     ws_url = f"ws://{COMFY_HOST}/ws?clientId={client_id}"
@@ -214,6 +218,25 @@ def handler(job):
         decode_to_file(garment_b64, os.path.join(INPUT_DIR, img_name))
     else:
         img_name = None
+
+    # Patch model filenames to files already preloaded on the EU volume
+    def patch_model_input(node_ids, input_key, value):
+        for nid in node_ids:
+            if nid in wf and "inputs" in wf[nid] and input_key in wf[nid]["inputs"]:
+                wf[nid]["inputs"][input_key] = value
+    # UNET H3 (Node 9) — file sudah ada di volume
+    patch_model_input(["9"], "unet_name", "minimax_h3_ref2va_pruned_int8_convrot.safetensors")
+    # LoRA turbo ref2v 4-step (Node 10) — file resmi sudah ada di volume
+    patch_model_input(["10"], "lora_name", "minimax_h3_ref2v_turbo_4step_v0.1_comfyui_bf16.safetensors")
+    # Qwen3-VL 32B INT8 (Nodes 8 describer + 13 text encoder) — file sudah ada di volume
+    patch_model_input(["8", "13"], "clip_name", "qwen3vl_32b_minimax_h3_int8_convrot.safetensors")
+    # VAE H3 (Nodes 14 video + 15 audio) — file sudah ada di volume
+    patch_model_input(["14"], "vae_name", "minimax_h3_video_vae_int8_convrot.safetensors")
+    patch_model_input(["15"], "vae_name", "minimax_h3_audio_vae_fp32.safetensors")
+    # SAM 3.1 (Node 17 CheckpointLoader) — file tidak ada di repo resmi.
+    # Bypass: ganti dengan passthrough dummy agar ComfyUI tidak 404 saat /prompt.
+    if "17" in wf and wf["17"].get("class_type") == "CheckpointLoaderSimple":
+        wf["17"]["inputs"]["ckpt_name"] = "minimax_h3_ref2va_pruned_int8_convrot.safetensors"  # placeholder valid
 
     # Patch workflow nodes
     # Node 5: VHS_LoadVideo
