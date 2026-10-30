@@ -37,6 +37,20 @@ def ensure_comfy_running():
     os.makedirs(INPUT_DIR, exist_ok=True)
     os.makedirs(OUTPUT_DIR, exist_ok=True)
 
+    # Link ComfyUI models -> network volume (source of truth)
+    try:
+        vol_models = "/runpod-volume/models"
+        comfy_models = os.path.join(COMFY_DIR, "models")
+        if os.path.exists(vol_models):
+            if os.path.islink(comfy_models):
+                os.unlink(comfy_models)
+            elif os.path.isdir(comfy_models):
+                import shutil
+                shutil.rmtree(comfy_models)
+            os.symlink(vol_models, comfy_models)
+    except Exception as e:
+        print(f"[INFO] Model symlink note: {e}", flush=True)
+
     cmd = [
         "python",
         os.path.join(COMFY_DIR, "main.py"),
@@ -120,7 +134,21 @@ def handle_preload():
     os.environ["HF_XET_HIGH_PERFORMANCE"] = "0"
     base_url = "https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/main"
     repo = "Comfy-Org/MiniMax-H3"
-    target_base = "/workspace/ComfyUI/models"
+    # Network volume always mounts at /runpod-volume on RunPod serverless workers
+    target_base = "/runpod-volume/models"
+    # Symlink ComfyUI models dir -> network volume (source of truth for weights)
+    comfy_models = "/workspace/ComfyUI/models"
+    try:
+        if os.path.islink(comfy_models):
+            os.unlink(comfy_models)
+        elif os.path.isdir(comfy_models):
+            import shutil
+            shutil.rmtree(comfy_models)
+        os.makedirs(target_base, exist_ok=True)
+        os.symlink(target_base, comfy_models)
+        print(f"[PRELOAD] Symlinked {comfy_models} -> {target_base}", flush=True)
+    except Exception as e:
+        print(f"[PRELOAD] Symlink note: {e}", flush=True)
     files = [
         ("diffusion_models", "diffusion_models/minimax_h3_ref2va_pruned_int8_convrot.safetensors"),
         ("text_encoders", "text_encoders/qwen3vl_32b_minimax_h3_int8_convrot.safetensors"),
