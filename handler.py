@@ -107,8 +107,41 @@ def get_output_files(prompt_id):
                 files.append(os.path.join(OUTPUT_DIR, item.get("subfolder", ""), item["filename"]))
     return files
 
+def handle_preload():
+    """Download models directly inside RunPod datacenter straight into the mounted Network Volume."""
+    from huggingface_hub import hf_hub_download
+    repo = "Comfy-Org/MiniMax-H3"
+    target_base = "/workspace/ComfyUI/models"
+    files = [
+        ("diffusion_models", "diffusion_models/minimax_h3_ref2va_pruned_int8_convrot.safetensors"),
+        ("text_encoders", "text_encoders/qwen3vl_32b_minimax_h3_int8_convrot.safetensors"),
+        ("vae", "vae/minimax_h3_video_vae_int8_convrot.safetensors"),
+        ("vae", "vae/minimax_h3_audio_vae_fp32.safetensors"),
+        ("loras", "loras/minimax_h3_ref2v_turbo_4step_v0.1_comfyui_bf16.safetensors")
+    ]
+    results = []
+    for sub, rpath in files:
+        d = os.path.join(target_base, sub)
+        os.makedirs(d, exist_ok=True)
+        fname = rpath.split("/")[-1]
+        dst = os.path.join(d, fname)
+        if os.path.exists(dst) and os.path.getsize(dst) > 1000:
+            print(f"[PRELOAD] Exists: {dst} ({os.path.getsize(dst)} bytes)", flush=True)
+            results.append({"file": fname, "status": "already_exists", "size": os.path.getsize(dst)})
+            continue
+        print(f"[PRELOAD] Downloading {fname}...", flush=True)
+        downloaded = hf_hub_download(repo_id=repo, filename=rpath, local_dir=target_base)
+        sz = os.path.getsize(downloaded) if os.path.exists(downloaded) else 0
+        print(f"[PRELOAD] Done {fname} ({sz} bytes)", flush=True)
+        results.append({"file": fname, "status": "downloaded", "size": sz})
+
+    return {"status": "PRELOAD_SUCCESS", "files": results}
+
 def handler(job):
     job_input = job.get("input") or {}
+    if job_input.get("action") == "preload":
+        return handle_preload()
+
     ensure_comfy_running()
 
     prompt_text = (job_input.get("prompt") or "").strip()
