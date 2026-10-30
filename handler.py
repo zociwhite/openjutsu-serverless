@@ -17,7 +17,14 @@ COMFY_HOST = "127.0.0.1:8188"
 COMFY_DIR = "/workspace/ComfyUI"
 INPUT_DIR = os.path.join(COMFY_DIR, "input")
 OUTPUT_DIR = os.path.join(COMFY_DIR, "output")
-WORKFLOW_FILE = "/workspace/worker_src/object_swap_workflow.json"
+WORKFLOW_FILES = {
+    "object": "/workspace/worker_src/object_swap_workflow.json",
+    "simple": "/workspace/worker_src/object_swap_workflow.json",  # reuse simple swap plan structure
+    "advanced": "/workspace/worker_src/object_swap_workflow.json",
+    "face": "/workspace/worker_src/object_swap_workflow.json",
+    "color": "/workspace/worker_src/object_swap_workflow.json",
+}
+WORKFLOW_FILE = WORKFLOW_FILES["object"]
 
 _comfy_proc = None
 
