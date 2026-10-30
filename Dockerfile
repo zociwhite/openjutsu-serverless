@@ -46,6 +46,7 @@ WORKDIR /workspace
 COPY . /workspace/worker_src/
 RUN cp /workspace/worker_src/handler.py /workspace/handler.py && \
     cp /workspace/worker_src/requirements.txt /workspace/requirements.txt && \
+    cp -r /workspace/worker_src/openjutsu_compat /workspace/ComfyUI/custom_nodes/openjutsu_compat && \
     pip install --no-cache-dir -r /workspace/requirements.txt
 
 # Model weights are NOT baked in — mounted from RunPod Network Volume at:
