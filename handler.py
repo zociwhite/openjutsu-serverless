@@ -19,7 +19,7 @@ INPUT_DIR = os.path.join(COMFY_DIR, "input")
 OUTPUT_DIR = os.path.join(COMFY_DIR, "output")
 WORKFLOW_FILES = {
     "object": "/workspace/worker_src/object_swap_workflow.json",
-    "simple": "/workspace/worker_src/object_swap_workflow.json",  # reuse simple swap plan structure
+    "simple": "/workspace/worker_src/simple.api.json",
     "advanced": "/workspace/worker_src/object_swap_workflow.json",
     "face": "/workspace/worker_src/object_swap_workflow.json",
     "color": "/workspace/worker_src/object_swap_workflow.json",
@@ -58,7 +58,8 @@ def ensure_comfy_running():
         "--port", "8188",
         "--disable-auto-launch"
     ]
-    _comfy_proc = subprocess.Popen(cmd, cwd=COMFY_DIR)
+    log_f = open("/tmp/comfyui.log", "a", encoding="utf-8")
+    _comfy_proc = subprocess.Popen(cmd, cwd=COMFY_DIR, stdout=log_f, stderr=subprocess.STDOUT)
 
     # Wait for ComfyUI to become available
     for i in range(60):
@@ -91,7 +92,14 @@ def queue_prompt(prompt_workflow):
         return res["prompt_id"], client_id
     except urllib.error.HTTPError as err:
         err_body = err.read().decode("utf-8", errors="replace")
-        raise RuntimeError(f"ComfyUI prompt validation failed (HTTP {err.code}): {err_body}")
+        log_tail = ""
+        if os.path.isfile("/tmp/comfyui.log"):
+            try:
+                with open("/tmp/comfyui.log", "r", encoding="utf-8", errors="replace") as f:
+                    log_tail = "\n[ComfyUI Log Tail]:\n" + "".join(f.readlines()[-30:])
+            except Exception:
+                pass
+        raise RuntimeError(f"ComfyUI prompt validation failed (HTTP {err.code}): {err_body}{log_tail}")
 
 def wait_for_execution(prompt_id, client_id, timeout=600):
     ws_url = f"ws://{COMFY_HOST}/ws?clientId={client_id}"
@@ -200,7 +208,11 @@ def handler(job):
         return {"error": "'prompt' is required (e.g. 'change clothes to red flannel shirt')"}
 
     # Load base workflow
-    with open(WORKFLOW_FILE, "r", encoding="utf-8") as f:
+    wf_type = job_input.get("workflow") or "object"
+    wf_path = WORKFLOW_FILES.get(wf_type, WORKFLOW_FILES["object"])
+    if not os.path.isfile(wf_path):
+        wf_path = WORKFLOW_FILES["object"]
+    with open(wf_path, "r", encoding="utf-8") as f:
         wf = json.load(f)
 
     uid = str(uuid.uuid4())[:8]
@@ -224,19 +236,24 @@ def handler(job):
         for nid in node_ids:
             if nid in wf and "inputs" in wf[nid] and input_key in wf[nid]["inputs"]:
                 wf[nid]["inputs"][input_key] = value
-    # UNET H3 (Node 9) — file sudah ada di volume
-    patch_model_input(["9"], "unet_name", "minimax_h3_ref2va_pruned_int8_convrot.safetensors")
-    # LoRA turbo ref2v 4-step (Node 10) — file resmi sudah ada di volume
-    patch_model_input(["10"], "lora_name", "minimax_h3_ref2v_turbo_4step_v0.1_comfyui_bf16.safetensors")
-    # Qwen3-VL 32B INT8 (Nodes 8 describer + 13 text encoder) — file sudah ada di volume
-    patch_model_input(["8", "13"], "clip_name", "qwen3vl_32b_minimax_h3_int8_convrot.safetensors")
-    # VAE H3 (Nodes 14 video + 15 audio) — file sudah ada di volume
-    patch_model_input(["14"], "vae_name", "minimax_h3_video_vae_int8_convrot.safetensors")
-    patch_model_input(["15"], "vae_name", "minimax_h3_audio_vae_fp32.safetensors")
-    # SAM 3.1 (Node 17 CheckpointLoader) — file tidak ada di repo resmi.
+    # UNET H3 (Node 9 object / 15 simple) — file sudah ada di volume
+    patch_model_input(["9", "15"], "unet_name", "minimax_h3_ref2va_pruned_int8_convrot.safetensors")
+    # LoRA turbo ref2v 4-step (Node 10 object / 16 simple) — file resmi sudah ada di volume
+    patch_model_input(["10", "16"], "lora_name", "minimax_h3_ref2v_turbo_4step_v0.1_comfyui_bf16.safetensors")
+    # Qwen3-VL 32B INT8 (Nodes 8, 13 object / 13, 19 simple) — file sudah ada di volume
+    patch_model_input(["8", "13", "19"], "clip_name", "qwen3vl_32b_minimax_h3_int8_convrot.safetensors")
+    # VAE H3 (Nodes 14 video + 15 audio object / 20 video + 21 audio simple) — file sudah ada di volume
+    patch_model_input(["14", "20"], "vae_name", "minimax_h3_video_vae_int8_convrot.safetensors")
+    patch_model_input(["15", "21"], "vae_name", "minimax_h3_audio_vae_fp32.safetensors")
+    # SAM 3.1 (Node 17 object / Node 23 simple CheckpointLoader) — file tidak
+    # ada di repo resmi facebook/sam3 (hanya model.safetensors).
     # Bypass: ganti dengan passthrough dummy agar ComfyUI tidak 404 saat /prompt.
-    if "17" in wf and wf["17"].get("class_type") == "CheckpointLoaderSimple":
-        wf["17"]["inputs"]["ckpt_name"] = "minimax_h3_ref2va_pruned_int8_convrot.safetensors"  # placeholder valid
+    for _nid in (["17"] if wf_type == "object" else ["23"] if wf_type == "simple" else []):
+        if _nid in wf and wf[_nid].get("class_type") == "CheckpointLoaderSimple":
+            if wf_type == "simple":
+                wf[_nid]["inputs"]["ckpt_name"] = "sam_vit_b_01ec64.pth"  # FaceRefine fallback
+            else:
+                wf[_nid]["inputs"]["ckpt_name"] = "sam_vit_b_01ec64.pth"
 
     # Patch workflow nodes
     # Node 5: VHS_LoadVideo
@@ -245,11 +262,34 @@ def handler(job):
     # Node 2: LoadImage (Garment picture)
     if img_name and "2" in wf and "inputs" in wf["2"]:
         wf["2"]["inputs"]["image"] = img_name
-    # Node 7: H3ObjectSwapPlan (Prompt / Action)
-    if "7" in wf and "inputs" in wf["7"]:
-        wf["7"]["inputs"]["prompt"] = prompt_text
+    # Node 7: H3ObjectSwapPlan (Action / Prompt) — only on object workflow
+    if wf_type == "object" and "7" in wf and "inputs" in wf["7"]:
+        wf["7"]["inputs"]["change_to"] = prompt_text
+        if "what_to_replace" in job_input:
+            wf["7"]["inputs"]["target"] = str(job_input["what_to_replace"])
+        elif "target" in job_input:
+            wf["7"]["inputs"]["target"] = str(job_input["target"])
+        if "object_op" in job_input:
+            wf["7"]["inputs"]["mode"] = str(job_input["object_op"])
+        if "steps" in job_input:
+            wf["7"]["inputs"]["steps"] = int(job_input["steps"])
+        if "resolution" in job_input:
+            wf["7"]["inputs"]["resolution"] = str(job_input["resolution"])
         if "seed" in job_input:
             wf["7"]["inputs"]["seed"] = int(job_input["seed"])
+    # Node 18: SAM tracking target text (object workflow only)
+    if wf_type == "object" and "18" in wf and "inputs" in wf["18"]:
+        target_text = job_input.get("what_to_replace") or job_input.get("target")
+        if target_text:
+            wf["18"]["inputs"]["text"] = str(target_text)
+    # Node 11: H3OneClickSwapPlan (simple workflow) — seed/size only, no prompt field
+    if wf_type == "simple" and "11" in wf and "inputs" in wf["11"]:
+        if "steps" in job_input:
+            wf["11"]["inputs"]["steps"] = int(job_input["steps"])
+        if "resolution" in job_input:
+            wf["11"]["inputs"]["resolution"] = str(job_input["resolution"])
+        if "seed" in job_input:
+            wf["11"]["inputs"]["seed"] = int(job_input["seed"])
 
     # Submit job to ComfyUI
     prompt_id, client_id = queue_prompt(wf)

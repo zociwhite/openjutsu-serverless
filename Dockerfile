@@ -8,7 +8,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # Clone ComfyUI (pinned to H3-capable release line)
-RUN git clone --depth 1 --branch v0.41.2 https://github.com/comfyanonymous/ComfyUI.git ComfyUI
+RUN git clone --depth 1 --branch v0.42.0 https://github.com/comfyanonymous/ComfyUI.git ComfyUI
 
 # Install ComfyUI core dependencies
 RUN cd ComfyUI && pip install --no-cache-dir torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu124 && \
