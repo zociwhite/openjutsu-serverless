@@ -16,18 +16,24 @@ RUN cd ComfyUI && pip install --no-cache-dir torch torchvision torchaudio --inde
 
 WORKDIR /workspace/ComfyUI/custom_nodes
 
-# Clone OpenJutsu required custom nodes (pinned revisions where known)
-RUN git clone https://github.com/Fantastic-Dave/ComfyUI-MiniMaxH3-Context-Loop && \
-    git clone https://github.com/Fantastic-Dave/ComfyUI-Fantastic-MiniMaxH3-PromptBuilder && \
+# Clone OpenJutsu required custom nodes (URLs verified 200 OK via README official)
+RUN git clone https://github.com/ethanfel/ComfyUI-MiniMaxH3-Context-Loop && \
+    git clone https://github.com/Adudeguyman/ComfyUI-Fantastic-MiniMaxH3-PromptBuilder && \
     git clone https://github.com/kijai/ComfyUI-KJNodes && \
     git clone https://github.com/Fannovel16/comfyui_controlnet_aux && \
     git clone https://github.com/Kosinkadink/ComfyUI-VideoHelperSuite && \
     git clone https://github.com/D3voz/comfyui-h3-oneclick-swap && \
     git clone https://github.com/Carasibana/ComfyUI-H3-FaceRefine && \
     git clone https://github.com/ltdrdata/ComfyUI-Impact-Pack && \
-    git clone https://github.com/quietquis/comfyui-image-detail-contrast && \
-    git clone https://github.com/IDGall/Orion4D_FXMax && \
+    git clone https://github.com/D3voz/comfyui-image-detail-contrast && \
+    git clone https://github.com/orion4d/Orion4D_FXMax && \
     git clone https://github.com/D3voz/comfyui-websocket-reconnect-fix
+
+# Clone SolarRenderer (relighting subfolder: Enderfga/SolarRenderer/comfyui)
+RUN git clone --depth 1 https://github.com/Enderfga/SolarRenderer SolarRenderer_src && \
+    mkdir -p SolarRenderer && \
+    cp -r SolarRenderer_src/comfyui/* SolarRenderer/ 2>/dev/null || cp -r SolarRenderer_src/* SolarRenderer/ && \
+    rm -rf SolarRenderer_src
 
 # Install per-pack Python dependencies into ComfyUI env
 RUN for d in ComfyUI-MiniMaxH3-Context-Loop ComfyUI-Fantastic-MiniMaxH3-PromptBuilder ComfyUI-KJNodes comfyui_controlnet_aux ComfyUI-VideoHelperSuite comfyui-h3-oneclick-swap ComfyUI-H3-FaceRefine ComfyUI-Impact-Pack comfyui-image-detail-contrast Orion4D_FXMax ; do \
