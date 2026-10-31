@@ -40,6 +40,8 @@ jobs:
           context: .
           file: ./Dockerfile
           push: true
-          tags: z0ci/openjutsu-serverless:latest
+          tags: |
+            z0ci/openjutsu-serverless:latest
+            z0ci/openjutsu-serverless:${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max

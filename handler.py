@@ -140,6 +140,51 @@ def get_output_files(prompt_id):
                 files.append(os.path.join(OUTPUT_DIR, item.get("subfolder", ""), item["filename"]))
     return files
 
+def get_available_node_types():
+    req = urllib.request.Request(f"http://{COMFY_HOST}/object_info")
+    with urllib.request.urlopen(req, timeout=15) as r:
+        info = json.loads(r.read().decode())
+    return set(info.keys())
+
+def handle_diagnose():
+    ensure_comfy_running()
+    available = get_available_node_types()
+
+    # Load workflows and compare
+    diag = {
+        "status": "DIAGNOSE_REPORT",
+        "comfy_total_nodes": len(available),
+        "workflows": {}
+    }
+
+    for name, path in WORKFLOW_FILES.items():
+        if not os.path.isfile(path):
+            diag["workflows"][name] = {"error": f"File not found: {path}"}
+            continue
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                w_data = json.load(f)
+            needed = {n.get("class_type") for n in w_data.values() if n.get("class_type")}
+            missing = sorted(needed - available)
+            diag["workflows"][name] = {
+                "total_nodes": len(w_data),
+                "unique_class_types": len(needed),
+                "missing_class_types": missing,
+                "is_executable": len(missing) == 0
+            }
+        except Exception as exc:
+            diag["workflows"][name] = {"error": str(exc)}
+
+    # Read ComfyUI log errors
+    errors = []
+    if os.path.isfile("/tmp/comfyui.log"):
+        with open("/tmp/comfyui.log", "r", encoding="utf-8", errors="replace") as f:
+            for line in f:
+                if any(k in line for k in ["Error", "error", "Traceback", "IMPORT FAILED", "ModuleNotFoundError", "failed to load"]):
+                    errors.append(line.rstrip())
+    diag["log_errors_tail"] = errors[-50:]
+    return diag
+
 def handle_preload():
     """Download models directly inside RunPod datacenter straight into the mounted Network Volume."""
     os.environ["HF_HUB_ENABLE_HF_TRANSFER"] = "0"
@@ -200,6 +245,8 @@ def handler(job):
     job_input = job.get("input") or {}
     if job_input.get("action") == "preload":
         return handle_preload()
+    if job_input.get("action") == "diagnose":
+        return handle_diagnose()
 
     ensure_comfy_running()
 
@@ -214,6 +261,26 @@ def handler(job):
         wf_path = WORKFLOW_FILES["object"]
     with open(wf_path, "r", encoding="utf-8") as f:
         wf = json.load(f)
+
+    # Pre-flight check: verify all node types exist before queuing prompt
+    try:
+        available = get_available_node_types()
+        needed = {n.get("class_type") for n in wf.values() if n.get("class_type")}
+        missing = sorted(needed - available)
+        if missing:
+            log_tail = ""
+            if os.path.isfile("/tmp/comfyui.log"):
+                try:
+                    with open("/tmp/comfyui.log", "r", encoding="utf-8", errors="replace") as lf:
+                        log_tail = "\n[Log Error Hints]: " + " ".join([l.strip() for l in lf if "Error" in l or "Traceback" in l][-5:])
+                except Exception:
+                    pass
+            return {
+                "error": f"Preflight validation failed: missing custom node types: {missing}.{log_tail}",
+                "missing_nodes": missing
+            }
+    except Exception as e:
+        print(f"[WARN] Preflight check error: {e}", flush=True)
 
     uid = str(uuid.uuid4())[:8]
 
