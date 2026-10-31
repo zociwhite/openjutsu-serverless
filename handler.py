@@ -62,7 +62,14 @@ def ensure_comfy_running():
     _comfy_proc = subprocess.Popen(cmd, cwd=COMFY_DIR, stdout=log_f, stderr=subprocess.STDOUT)
 
     # Wait for ComfyUI to become available
-    for i in range(60):
+    for i in range(120):
+        if _comfy_proc.poll() is not None:
+            # Subprocess died!
+            log_tail = ""
+            if os.path.isfile("/tmp/comfyui.log"):
+                with open("/tmp/comfyui.log", "r", encoding="utf-8", errors="replace") as f:
+                    log_tail = "\n".join(f.readlines()[-40:])
+            raise RuntimeError(f"ComfyUI process exited prematurely with code {_comfy_proc.returncode}!\n[ComfyUI Log Tail]:\n{log_tail}")
         try:
             req = urllib.request.Request(f"http://{COMFY_HOST}/system_stats")
             with urllib.request.urlopen(req, timeout=3) as r:
@@ -71,7 +78,12 @@ def ensure_comfy_running():
                     return
         except Exception:
             time.sleep(1)
-    print("[WARN] ComfyUI start timed out, proceeding anyway...", flush=True)
+
+    log_tail = ""
+    if os.path.isfile("/tmp/comfyui.log"):
+        with open("/tmp/comfyui.log", "r", encoding="utf-8", errors="replace") as f:
+            log_tail = "\n".join(f.readlines()[-40:])
+    raise RuntimeError(f"ComfyUI start timed out after 120s!\n[ComfyUI Log Tail]:\n{log_tail}")
 
 def decode_to_file(data_str, out_path):
     if data_str.startswith("data:"):
