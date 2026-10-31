@@ -201,8 +201,10 @@ def handle_preload():
     """Download models directly inside RunPod datacenter straight into the mounted Network Volume."""
     os.environ["HF_HUB_ENABLE_HF_TRANSFER"] = "0"
     os.environ["HF_XET_HIGH_PERFORMANCE"] = "0"
-    base_url = "https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/main"
-    repo = "Comfy-Org/MiniMax-H3"
+    repos = {
+        "Comfy-Org/MiniMax-H3": "https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/main",
+        "Comfy-Org/sam3.1": "https://huggingface.co/Comfy-Org/sam3.1/resolve/main",
+    }
     # Network volume always mounts at /runpod-volume on RunPod serverless workers
     target_base = "/runpod-volume/models"
     # Symlink ComfyUI models dir -> network volume (source of truth for weights)
@@ -219,14 +221,15 @@ def handle_preload():
     except Exception as e:
         print(f"[PRELOAD] Symlink note: {e}", flush=True)
     files = [
-        ("diffusion_models", "diffusion_models/minimax_h3_ref2va_pruned_int8_convrot.safetensors"),
-        ("text_encoders", "text_encoders/qwen3vl_32b_minimax_h3_int8_convrot.safetensors"),
-        ("vae", "vae/minimax_h3_video_vae_int8_convrot.safetensors"),
-        ("vae", "vae/minimax_h3_audio_vae_fp32.safetensors"),
-        ("loras", "loras/minimax_h3_ref2v_turbo_4step_v0.1_comfyui_bf16.safetensors")
+        ("diffusion_models", "diffusion_models/minimax_h3_ref2va_pruned_int8_convrot.safetensors", "Comfy-Org/MiniMax-H3"),
+        ("text_encoders", "text_encoders/qwen3vl_32b_minimax_h3_int8_convrot.safetensors", "Comfy-Org/MiniMax-H3"),
+        ("vae", "vae/minimax_h3_video_vae_int8_convrot.safetensors", "Comfy-Org/MiniMax-H3"),
+        ("vae", "vae/minimax_h3_audio_vae_fp32.safetensors", "Comfy-Org/MiniMax-H3"),
+        ("loras", "loras/minimax_h3_ref2v_turbo_4step_v0.1_comfyui_bf16.safetensors", "Comfy-Org/MiniMax-H3"),
+        ("checkpoints", "checkpoints/sam3.1_multiplex_fp16.safetensors", "Comfy-Org/sam3.1"),
     ]
     results = []
-    for sub, rpath in files:
+    for sub, rpath, repo_name in files:
         d = os.path.join(target_base, sub)
         os.makedirs(d, exist_ok=True)
         fname = rpath.split("/")[-1]
@@ -236,7 +239,7 @@ def handle_preload():
             results.append({"file": fname, "status": "already_exists", "size": os.path.getsize(dst)})
             continue
         print(f"[PRELOAD] Downloading {fname} via streaming URL...", flush=True)
-        # Use direct chunked HTTP download to avoid xet/hf_transfer NFS lock issues on RunPod volumes
+        base_url = repos[repo_name]
         file_url = f"{base_url}/{rpath}"
         tmp_dst = dst + ".part"
         req = urllib.request.Request(file_url, headers={"User-Agent": "Mozilla/5.0"})
@@ -324,15 +327,11 @@ def handler(job):
     # VAE H3 (Nodes 14 video + 15 audio object / 20 video + 21 audio simple) — file sudah ada di volume
     patch_model_input(["14", "20"], "vae_name", "minimax_h3_video_vae_int8_convrot.safetensors")
     patch_model_input(["15", "21"], "vae_name", "minimax_h3_audio_vae_fp32.safetensors")
-    # SAM 3.1 (Node 17 object / Node 23 simple CheckpointLoader) — file tidak
-    # ada di repo resmi facebook/sam3 (hanya model.safetensors).
-    # Bypass: ganti dengan passthrough dummy agar ComfyUI tidak 404 saat /prompt.
+    # SAM 3.1 (Node 17 object / Node 23 simple CheckpointLoader) — file asli di preload:
+    # Comfy-Org/sam3.1 checkpoints/sam3.1_multiplex_fp16.safetensors
     for _nid in (["17"] if wf_type == "object" else ["23"] if wf_type == "simple" else []):
         if _nid in wf and wf[_nid].get("class_type") == "CheckpointLoaderSimple":
-            if wf_type == "simple":
-                wf[_nid]["inputs"]["ckpt_name"] = "sam_vit_b_01ec64.pth"  # FaceRefine fallback
-            else:
-                wf[_nid]["inputs"]["ckpt_name"] = "sam_vit_b_01ec64.pth"
+            wf[_nid]["inputs"]["ckpt_name"] = "sam3.1_multiplex_fp16.safetensors"
 
     # Patch workflow nodes
     # Node 5: VHS_LoadVideo

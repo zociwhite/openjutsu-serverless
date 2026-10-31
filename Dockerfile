@@ -10,8 +10,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Clone ComfyUI (pinned to H3-capable release line)
 RUN git clone --depth 1 --branch v0.42.0 https://github.com/comfyanonymous/ComfyUI.git ComfyUI
 
-# Install ComfyUI core dependencies (pin torch trio for ABI stability)
-RUN cd ComfyUI && pip install --no-cache-dir torch==2.4.0 torchvision==0.19.0 torchaudio==2.4.0 --index-url https://download.pytorch.org/whl/cu124 && \
+# Install ComfyUI core dependencies (pin torch trio 2.5.1 for custom_op list[int] schema support)
+RUN cd ComfyUI && pip install --no-cache-dir torch==2.5.1 torchvision==0.20.1 torchaudio==2.5.1 --index-url https://download.pytorch.org/whl/cu124 && \
     pip install --no-cache-dir -r requirements.txt
 
 WORKDIR /workspace/ComfyUI/custom_nodes
@@ -40,7 +40,7 @@ RUN for d in ComfyUI-MiniMaxH3-Context-Loop ComfyUI-Fantastic-MiniMaxH3-PromptBu
       if [ -f "$d/requirements.txt" ]; then pip install --no-cache-dir -r "$d/requirements.txt"; fi; \
     done && \
     pip install --no-cache-dir ultralytics scipy insightface onnxruntime-gpu imageio-ffmpeg runpod requests websocket-client && \
-    pip install --no-cache-dir --force-reinstall --no-deps torch==2.4.0 torchvision==0.19.0 torchaudio==2.4.0 --index-url https://download.pytorch.org/whl/cu124
+    pip install --no-cache-dir --force-reinstall --no-deps torch==2.5.1 torchvision==0.20.1 torchaudio==2.5.1 --index-url https://download.pytorch.org/whl/cu124
 
 WORKDIR /workspace
 
